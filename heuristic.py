@@ -1,12 +1,3 @@
-import logging
-
-# logging configuration
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger("log")
-ch = logging.StreamHandler()
-ch.setLevel(logging.ERROR)
-logger.addHandler(ch)
-
 # global variables
 vertices = []
 edges = []
@@ -31,6 +22,10 @@ queue = []
 current_color = 0
 num_conflicts = 0
 index = 0
+interpretation = []
+INT_TRUE = 1
+INT_FALSE = -1
+INT_UNKNOWN = 0
 
 
 class Vertex:
@@ -230,7 +225,7 @@ def init_data():
     return True
 
 
-def onAnswerSet(answer_set):
+def onAnswerSet(*answer_set):
     """
     Optional. When the solver found an answer set
     :param answer_set: a list of literals which are in the answer set. "l" if the literal is true, "-l" if the literal is
@@ -247,11 +242,34 @@ def fallback():
     """
 
 
-def partialInterpretation():
-    pass
+def onVariableUndefined(var):
+    """
+    Optional. When a variable is set as  undefined (by an unroll).
+    :param var: the undefined variable
+    :return: None
+    """
+    global interpretation
+    interpretation[var] = INT_UNKNOWN
 
 
-def choiceVars(*partial_interpretation):
+def onLiteralsTrue(*lits):
+    """
+    Optional. When a set of literals is dervied as true either by propagation and by choice
+    :param lits: the true literals
+    :return: None
+    """
+    global interpretation
+    global INT_TRUE
+    global INT_FALSE
+    for l in lits:
+        interpretation[abs(l)] = INT_TRUE if l >= 0 else INT_FALSE
+
+
+def get_fallback():
+    return [1000, 2, 0]
+
+
+def choiceVars():
     """
     Required. This method is invoked when a choice is needed. It can return a choice, a list of choices and special
     values for performing special actions.
@@ -260,25 +278,23 @@ def choiceVars(*partial_interpretation):
      - [n, 2, 0] use the fallback heuristic for n steps (n<=0 use always fallback heuristic) -> require the presence of the method fallback() in the script
      - [v, 3, 0] unroll the truth value of the variable v
      - [4, 0] force the solver to stop the computation returning incoherent
-    :param partial_interpretation: The current partial interpretation
     :return: A list of choices. Be careful, the first choice is the last element in the list.
     """
+
     global index
+    global interpretation
+    global INT_TRUE
+    global INT_FALSE
 
     chosen_variable = 0
     bin_chosen = False
     bin_search = False
 
-    logger.debug("start choice_vars()")
-    logger.debug("partial interpretation (len = %d): %s", len(partial_interpretation), str(partial_interpretation))
-
     while (chosen_variable == 0) \
-            or (chosen_variable in partial_interpretation) \
-            or (-chosen_variable in partial_interpretation):
+            or (interpretation[chosen_variable] != INT_UNKNOWN):
 
         if not ordering_valid:
-            logger.debug("  fallback")
-            return [1000, 2, 0]  # fallback for 1000 steps
+            return get_fallback()  # fallback for 1000 steps
 
         chosen_variable = 0
         current_vertex = 0
@@ -286,19 +302,16 @@ def choiceVars(*partial_interpretation):
         current_vertex_bin = 0
 
         if not (index < len(order)):
-            logger.debug("  index out of range, continue (index = %d, len(order) = %d)", index, len(order))
             continue
 
         # fill the queue if empty
         if not queue:
-            logger.debug("  queue is empty")
             if index > 0:
                 global current_color
                 current_color += 1
 
-                if current_color > num_colors:
-                    logger.debug("  fallback")
-                    return [1000, 2, 0]  # fallback for 1000 steps
+                if current_color >= num_colors:
+                    return get_fallback()
 
             current_vertex = 0
             while current_vertex == 0 and index < len(order):
@@ -308,30 +321,26 @@ def choiceVars(*partial_interpretation):
                 index += 1
 
             if current_vertex == 0:
-                logger.debug("  fallback")
-                return [1000, 2, 0]  # fallback for 1000 steps
+               return get_fallback()  # fallback for 1000 steps
 
             queue.append(current_vertex)
 
         # get the first vertex
         current_vertex = queue[0]
-        logger.debug("  current_vertex = %s", current_vertex.name)
 
         current_vertex_color = 0
 
-        logger.debug("  current_vertex.all_colors length = %d", len(current_vertex.all_colors))
         for c in current_vertex.all_colors:
-            logger.debug("  c.var = %d; partial_interpredation = %s", c.var, str(partial_interpretation))
-            if c.var in partial_interpretation:
+            if interpretation[c.var] == INT_TRUE:
                 current_vertex_color = c.color
-                logger.debug("  current_vertex_color = %d", c.color)
 
         if current_vertex_color == 0:
+            # print("current_vertex.all_colors length = ", len(current_vertex.all_colors), "current_vertex.all_colors = ", current_vertex.all_colors, " current_color = ", current_color, " num_colors = ", num_colors)
             chosen_variable = current_vertex.all_colors[current_color].var
         elif current_vertex_color - 1 == current_color:
             current_vertex_bin = 0
             for b in current_vertex.all_bins:
-                if b.var in partial_interpretation:
+                if interpretation[b.var] == INT_TRUE:
                     current_vertex_bin = b
 
             # find a bin for the vertex if no bin is assigned to it yet
@@ -341,7 +350,7 @@ def choiceVars(*partial_interpretation):
                 for i in filter(lambda x: chosen_variable == 0, range(0, num_bins)):
                     used = 0
                     for ba in bins_by_color[current_color][i].all_vertices:
-                        if ba.var in partial_interpretation:
+                        if interpretation[ba.var] == INT_TRUE:
                             used += ba.vertex_size
 
                     if used + current_vertex.size <= max_bin_size:
@@ -350,20 +359,20 @@ def choiceVars(*partial_interpretation):
 
         if chosen_variable == 0:
             if current_vertex_color - 1 != current_color:
-                queue.pop()
+                queue.pop(0)
             elif bin_search:
-                queue.pop()
+                queue.pop(0)
                 current_vertex.considered = True
             elif current_vertex_bin != 0:
-                queue.pop()
+                queue.pop(0)
                 queue_add_neighbors(current_vertex)
                 current_vertex.considered = True
-        elif chosen_variable in partial_interpretation:
+        elif interpretation[chosen_variable] == INT_TRUE:
             if bin_chosen:
-                queue.pop()
+                queue.pop(0)
                 current_vertex.considered = True
-        elif (-chosen_variable) in partial_interpretation:
-            queue.pop()
+        elif interpretation[chosen_variable] == INT_FALSE:
+            queue.pop(0)
 
     return [chosen_variable]
 
@@ -476,8 +485,21 @@ def onFinishedParsing():
 
     input_correct = init_data()
 
-    print "input correct: %s" % input_correct
-    dbg_print_state()
+    # print "input correct: %s" % input_correct
+    # dbg_print_state()
+
+
+def onStartingSolver(num_vars, num_clauses):
+    """
+    Optional. When the computation starts (after reading the input and performing the simplifications)
+    :param num_vars: number of vars (ids for variables start from 1)
+    :param num_clauses: number of clauses
+    :return: None
+    """
+    # set-up interpretation
+    global interpretation
+    global INT_UNKNOWN
+    interpretation = [INT_UNKNOWN] * (num_vars + 1)
 
 
 def dbg_print_state():
@@ -512,6 +534,7 @@ def reset_heuristic():
     global index
     index = 0
 
+    global vertices
     for v in vertices:
         v.considered = False
 
