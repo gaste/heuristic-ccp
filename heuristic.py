@@ -125,13 +125,15 @@ def init_data():
         num_found = 0
         v_f = None
         v_t = None
-        for v in filter(lambda x: num_found < 2, vertices):
+        for v in vertices:
             if e.v_from == v.name:
                 v_f = v
                 num_found += 1
             if v.name == e.v_to:
                 v_t = v
                 num_found += 1
+            if num_found >= 2:
+                break
 
         if num_found != 2:
             return False
@@ -155,10 +157,11 @@ def init_data():
     # vertex colors ----------------------------------------------------------------------------------------------------
     for vc in vertex_colors:
         found = False
-        for v in filter(lambda x: not found, vertices):
+        for v in vertices:
             if v.name == vc.vertex:
                 found = True
                 v.all_colors.append(vc)
+                break
 
         if not found:
             return False
@@ -166,10 +169,11 @@ def init_data():
     # vertex bins ------------------------------------------------------------------------------------------------------
     for vb in vertex_bins:
         found = False
-        for v in filter(lambda x: not found, vertices):
+        for v in vertices:
             if v.name == vb.vertex:
                 found = True
                 v.all_bins.append(vb)
+                break
 
         if not found:
             return False
@@ -183,8 +187,8 @@ def init_data():
 
     # sort bins and colors ---------------------------------------------------------------------------------------------
     for vertex in vertices:
-        vertex.all_bins.sort(lambda b1, b2: b1.v_bin < b2.v_bin)
-        vertex.all_colors.sort(lambda c1, c2: c1.color < c2.color)
+        vertex.all_bins = sorted(vertex.all_bins, key=lambda b: b.v_bin)
+        vertex.all_colors = sorted(vertex.all_colors, key=lambda c: c.color)
 
     # get matching related edges ---------------------------------------------------------------------------------------
     for border_element in border_elements:
@@ -200,18 +204,18 @@ def init_data():
 
     # initialize vertex value for ordering -----------------------------------------------------------------------------
     for v_p in path_1:
-        found = False
-        for v in filter(lambda x: not found, vertices):
+        for v in vertices:
             if v_p == v.name:
                 v.in_path = 1
                 v.ordering_value += 1
+                break
 
     for v_p in path_2:
-        found = False
-        for v in filter(lambda x: not found, vertices):
+        for v in vertices:
             if v_p == v.name:
                 v.in_path = 2
                 v.ordering_value += 1
+                break
 
     for v in vertices:
         if (v.num_predecessors == 0) or (v.num_successors == 0):
@@ -220,7 +224,10 @@ def init_data():
         if v.ordering_value > 0:
             starting_vertices.append(v)
 
-    starting_vertices.sort(lambda v1, v2: v1.ordering_value > v2.ordering_value)
+    starting_vertices = sorted(starting_vertices, key=lambda u: u.ordering_value, reverse=True)
+    logger.debug("sorted starting_vertices:")
+    for u in starting_vertices:
+        logger.debug("  %s, ordering_value = %d", u.name, u.ordering_value)
 
     global order
     order = [v for v in vertices]
@@ -333,8 +340,6 @@ def choiceVars():
         current_vertex = queue[0]
         logger.debug("  current_vertex = %s", current_vertex.name)
 
-        logger.debug("interpretation[130] = %d", interpretation[130])
-
         for c in current_vertex.all_colors:
             if interpretation[c.var] == INT_TRUE:
                 current_vertex_color = c.color
@@ -356,7 +361,7 @@ def choiceVars():
         if chosen_variable == 0 and (current_vertex_color - 1) == current_color and current_vertex_bin == 0:
             bin_search = True
 
-            for i in filter(lambda x: chosen_variable == 0, range(0, num_bins)):
+            for i in range(0, num_bins):
                 used = 0
                 for ba in bins_by_color[current_color][i].all_vertices:
                     if interpretation[ba.var] == INT_TRUE:
@@ -366,6 +371,7 @@ def choiceVars():
                     logger.debug("  used + current_vertex.size = %d, max_bin_size = %d", (used + current_vertex.size), max_bin_size)
                     chosen_variable = current_vertex.all_bins[i].var
                     bin_chosen = True
+                    break
 
         if chosen_variable == 0:
             logger.debug("  chosen_variable = %d", chosen_variable)
@@ -379,6 +385,7 @@ def choiceVars():
             elif current_vertex_bin != 0:
                 logger.debug("vertex already placed in bin %d", current_vertex_bin)
                 queue.pop(0)
+                logger.debug("removed vertex from queue. queue size = %d. adding neighbors", len(queue))
                 queue_add_neighbors(current_vertex)
                 current_vertex.considered = True
         elif interpretation[chosen_variable] == INT_TRUE:
@@ -396,8 +403,6 @@ def choiceVars():
             queue_add_neighbors(current_vertex)
             current_vertex.considered = True
 
-        # logger.debug("end of loop: chosen_variable = %d in it = %d -in it = %d", chosen_variable, chosen_variable in partial_interpretation, (-chosen_variable) in partial_interpretation)
-
     logger.info("choosing variable %d", chosen_variable)
     return [chosen_variable]
 
@@ -410,9 +415,13 @@ def queue_add_neighbors(vertex):
             queue.append(neighbor)
 
     if vertex.in_path > 0:
-        queue.sort(lambda v1, v2: v1.in_path > v2.in_path)
+        queue = sorted(queue, key=lambda vert: vert.in_path, reverse=True)
     else:
-        queue.sort(lambda v1, v2: v1.in_path < v2.in_path)
+        queue = sorted(queue, key=lambda vert: vert.in_path)
+
+    logger.debug("queue_add_neighbors: vertex = %s, in_path = %d. sorted queue", vertex.name, vertex.in_path)
+    for v in queue:
+        logger.debug("     %s, in_path = %d", v.name, v.in_path)
 
 
 def ignorePolarity():
@@ -582,7 +591,8 @@ def create_order():
     start = starting_vertices.pop(0)
 
     start.ordering_value += 1
-    order.sort(lambda v1, v2: v1.ordering_value > v2.ordering_value)
+    global order
+    order = sorted(order, key=lambda v: v.ordering_value, reverse=True)
     start.ordering_value = 0
 
     return True
