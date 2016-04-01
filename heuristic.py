@@ -1,3 +1,10 @@
+import logging
+
+# logging configuration
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger("log")
+logger.propagate = False
+
 # global variables
 vertices = []
 edges = []
@@ -225,16 +232,6 @@ def init_data():
     return True
 
 
-def onAnswerSet(*answer_set):
-    """
-    Optional. When the solver found an answer set
-    :param answer_set: a list of literals which are in the answer set. "l" if the literal is true, "-l" if the literal is
-    false
-    :return: None
-    """
-    print answer_set
-
-
 def fallback():
     """
     Optional. This method should be added if the heuristic wants to use the fallback heuristic at some point
@@ -249,6 +246,7 @@ def onVariableUndefined(var):
     :return: None
     """
     global interpretation
+    global INT_UNKNOWN
     interpretation[var] = INT_UNKNOWN
 
 
@@ -266,6 +264,8 @@ def onLiteralsTrue(*lits):
 
 
 def get_fallback():
+    logger.debug("fallback [1000, 2, 0]")
+    reset_heuristic()
     return [1000, 2, 0]
 
 
@@ -285,16 +285,20 @@ def choiceVars():
     global interpretation
     global INT_TRUE
     global INT_FALSE
+    global INT_UNKNOWN
+    global current_color
 
     chosen_variable = 0
     bin_chosen = False
     bin_search = False
 
+    logger.debug("start choice_vars()")
+
     while (chosen_variable == 0) \
             or (interpretation[chosen_variable] != INT_UNKNOWN):
 
         if not ordering_valid:
-            return get_fallback()  # fallback for 1000 steps
+            return get_fallback()
 
         chosen_variable = 0
         current_vertex = 0
@@ -302,18 +306,18 @@ def choiceVars():
         current_vertex_bin = 0
 
         if not (index < len(order)):
+            logger.debug("  index out of range, continue (index = %d, len(order) = %d)", index, len(order))
             continue
 
         # fill the queue if empty
         if not queue:
+            logger.debug("  queue is empty")
             if index > 0:
-                global current_color
                 current_color += 1
 
                 if current_color >= num_colors:
                     return get_fallback()
 
-            current_vertex = 0
             while current_vertex == 0 and index < len(order):
                 if not order[index].considered:
                     current_vertex = order[index]
@@ -321,59 +325,80 @@ def choiceVars():
                 index += 1
 
             if current_vertex == 0:
-               return get_fallback()  # fallback for 1000 steps
+                return get_fallback()  # fallback for 1000 steps
 
             queue.append(current_vertex)
 
         # get the first vertex
         current_vertex = queue[0]
+        logger.debug("  current_vertex = %s", current_vertex.name)
 
-        current_vertex_color = 0
+        logger.debug("interpretation[130] = %d", interpretation[130])
 
         for c in current_vertex.all_colors:
             if interpretation[c.var] == INT_TRUE:
                 current_vertex_color = c.color
+                logger.debug("  current_vertex_color = %d", c.color)
+                break
 
         if current_vertex_color == 0:
-            # print("current_vertex.all_colors length = ", len(current_vertex.all_colors), "current_vertex.all_colors = ", current_vertex.all_colors, " current_color = ", current_color, " num_colors = ", num_colors)
             chosen_variable = current_vertex.all_colors[current_color].var
+            logger.debug("  current_vertex_color = %d, setting chosen variable to %d", current_vertex_color, chosen_variable)
         elif current_vertex_color - 1 == current_color:
             current_vertex_bin = 0
             for b in current_vertex.all_bins:
                 if interpretation[b.var] == INT_TRUE:
-                    current_vertex_bin = b
+                    current_vertex_bin = b.v_bin
+                    logger.debug("  current_vertex_bin = %s", b.v_bin)
+                    break
 
-            # find a bin for the vertex if no bin is assigned to it yet
-            if current_vertex_bin == 0:
-                bin_search = True
+        # find a bin for the vertex if no bin is assigned to it yet
+        if chosen_variable == 0 and (current_vertex_color - 1) == current_color and current_vertex_bin == 0:
+            bin_search = True
 
-                for i in filter(lambda x: chosen_variable == 0, range(0, num_bins)):
-                    used = 0
-                    for ba in bins_by_color[current_color][i].all_vertices:
-                        if interpretation[ba.var] == INT_TRUE:
-                            used += ba.vertex_size
+            for i in filter(lambda x: chosen_variable == 0, range(0, num_bins)):
+                used = 0
+                for ba in bins_by_color[current_color][i].all_vertices:
+                    if interpretation[ba.var] == INT_TRUE:
+                        used += ba.vertex_size
 
-                    if used + current_vertex.size <= max_bin_size:
-                        chosen_variable = current_vertex.all_bins[i].var
-                        bin_chosen = True
+                if used + current_vertex.size <= max_bin_size:
+                    logger.debug("  used + current_vertex.size = %d, max_bin_size = %d", (used + current_vertex.size), max_bin_size)
+                    chosen_variable = current_vertex.all_bins[i].var
+                    bin_chosen = True
 
         if chosen_variable == 0:
+            logger.debug("  chosen_variable = %d", chosen_variable)
             if current_vertex_color - 1 != current_color:
+                logger.debug("vertex %s is not colored in the current color - ignore it", current_vertex.name)
                 queue.pop(0)
             elif bin_search:
+                logger.debug("no bin found for vertex %s - ignore it", current_vertex.name)
                 queue.pop(0)
                 current_vertex.considered = True
             elif current_vertex_bin != 0:
+                logger.debug("vertex already placed in bin %d", current_vertex_bin)
                 queue.pop(0)
                 queue_add_neighbors(current_vertex)
                 current_vertex.considered = True
         elif interpretation[chosen_variable] == INT_TRUE:
+            logger.debug("chosen variable already set to true - continue")
             if bin_chosen:
                 queue.pop(0)
                 current_vertex.considered = True
         elif interpretation[chosen_variable] == INT_FALSE:
+            logger.debug("chosen variable already set to false - continue")
             queue.pop(0)
+        elif interpretation[chosen_variable] == INT_UNKNOWN:
+            logger.debug("chosen variable is undefined - return it")
+        elif bin_chosen:
+            queue.pop(0)
+            queue_add_neighbors(current_vertex)
+            current_vertex.considered = True
 
+        # logger.debug("end of loop: chosen_variable = %d in it = %d -in it = %d", chosen_variable, chosen_variable in partial_interpretation, (-chosen_variable) in partial_interpretation)
+
+    logger.info("choosing variable %d", chosen_variable)
     return [chosen_variable]
 
 
