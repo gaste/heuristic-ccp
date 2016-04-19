@@ -1,9 +1,10 @@
 import logging
+import time
 
 # logging configuration
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("log")
-logger.propagate = False
+# logger.propagate = False
 
 # global variables
 vertices = []
@@ -33,6 +34,9 @@ interpretation = []
 INT_TRUE = 1
 INT_FALSE = -1
 INT_UNKNOWN = 0
+
+
+fallback_start = -1
 
 
 class Vertex:
@@ -271,9 +275,27 @@ def onLiteralsTrue(*lits):
 
 
 def get_fallback():
-    logger.debug("fallback [1000, 2, 0]")
-    reset_heuristic()
+    global fallback_start
+
+    if -1 == fallback_start:
+        logger.info("starting fallback")
+        reset_heuristic()
+        fallback_start = time.time()
+
     return [1000, 2, 0]
+
+
+def check_fallback():
+    global fallback_start
+
+    fallback_elapsed = (time.time() - fallback_start)
+
+    if 0 <= fallback_elapsed <= 10:
+        logger.info("  in fallback (t = %.2f)", fallback_elapsed)
+        return True
+
+    fallback_start = -1
+    return False
 
 
 def choiceVars():
@@ -301,6 +323,9 @@ def choiceVars():
 
     logger.debug("start choice_vars()")
 
+    if check_fallback():
+        return get_fallback()
+
     while (chosen_variable == 0) \
             or (interpretation[chosen_variable] != INT_UNKNOWN):
 
@@ -318,14 +343,18 @@ def choiceVars():
 
         # fill the queue if empty
         if not queue:
-            logger.debug("  queue is empty")
+            logger.debug("  queue is empty (index = %d)", index)
             if index > 0:
                 current_color += 1
+                logger.debug("    increase color value to %d", current_color)
 
                 if current_color >= num_colors:
+                    logger.debug("    exceeded number of colors, falling back")
                     return get_fallback()
 
+            logger.debug("    searching in order (starting index = %d)", index)
             while current_vertex == 0 and index < len(order):
+                logger.debug("      %s considered = %s", order[index].name, order[index].considered)
                 if not order[index].considered:
                     current_vertex = order[index]
 
@@ -594,6 +623,9 @@ def create_order():
     global order
     order = sorted(order, key=lambda v: v.ordering_value, reverse=True)
     start.ordering_value = 0
+
+    logger.debug("created order:")
+    logger.debug(', '.join([str(v.name) for v in order]))
 
     return True
 
