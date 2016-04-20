@@ -613,19 +613,19 @@ def create_order():
     Create a new ordering
     :return: True if the ordering is correct, False otherwise
     """
-    global starting_vertices
+    global starting_vertices, order
     if not starting_vertices:
         return False
+
+    logger.debug("order before sorting" + ', '.join([str(v.name) + "(" + str(v.ordering_value) + ")" for v in order]))
 
     start = starting_vertices.pop(0)
 
     start.ordering_value += 1
-    global order
     order = sorted(order, key=lambda v: v.ordering_value, reverse=True)
     start.ordering_value = 0
 
-    logger.debug("created order:")
-    logger.debug(', '.join([str(v.name) for v in order]))
+    logger.debug("order after sorting" + ', '.join([str(v.name) + "(" + str(v.ordering_value) + ")" for v in order]))
 
     return True
 
