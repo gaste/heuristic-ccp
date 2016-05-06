@@ -2,9 +2,9 @@ import logging
 import time
 
 # logging configuration
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("log")
-# logger.propagate = False
+logger.propagate = False # disable logging
 
 # global variables
 vertices = []
@@ -211,19 +211,17 @@ def init_data():
         for v in vertices:
             if v_p == v.name:
                 v.in_path = 1
-                v.ordering_value += 1
                 break
 
     for v_p in path_2:
         for v in vertices:
             if v_p == v.name:
                 v.in_path = 2
-                v.ordering_value += 1
                 break
 
     for v in vertices:
         if (v.num_predecessors == 0) or (v.num_successors == 0):
-            v.ordering_value += 2
+            v.ordering_value += 1
 
         if v.ordering_value > 0:
             starting_vertices.append(v)
